@@ -1,0 +1,215 @@
+% --- UNIVERSAL PREAMBLE BLOCK ---
+\documentclass[11pt, a4paper]{article}
+
+\usepackage[a4paper, top=2.5cm, bottom=2.5cm, left=2cm, right=2cm]{geometry}
+\usepackage{fontspec}
+
+\usepackage[english, bidi=basic, provide=*]{babel}
+
+\babelprovide[import, onchar=ids fonts]{english}
+
+% Set default/Latin font to Sans Serif in the main (rm) slot
+\babelfont{rm}{Noto Sans}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{enumitem}
+
+\title{\textbf{Self-Consistent Proportional Per-Node Damping for Reachability Ranking in Uncertain Graphs}}
+\author{\textbf{Ioannis Konstantellos} \\ \textit{Computer Engineering and Informatics Department, University of Patras, Greece}}
+\date{October 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Damped diffusion heuristics for ranking vertices by expected reachable mass $y^*_i = \mathbb{E}[\sum_{v \in C(i)} x_v]$ in an uncertain graph $G=(V,E,p)$ conventionally employ a single global damping scalar $\alpha \in (0,1)$. However, as shown in our prior coordinate-ascent oracle experiments, allowing each vertex $i$ to take its own local damping factor $\alpha_i$ yields a substantial out-of-sample ranking gain ($+0.062$ overall and $+0.341$ on grid topologies) that cannot be captured by local escape probabilities alone. In this paper, we introduce a parameter-free, self-consistent \textbf{Proportional Relative Influence Principle} that dynamically determines both the score $y_i$ and the local damping factor $\alpha_i$ of each vertex $i$ at every iteration. Specifically, we require that the ratio of external damping weight to internal prior weight, $\frac{\alpha_i}{1 - \alpha_i}$, equals the relative excess influence gained by the vertex from its neighborhood over its intrinsic prior mass, $\frac{y_i - x_i}{x_i}$. Coupling this proportionality law with the damped diffusion update $y_i = (1 - \alpha_i) x_i + \alpha_i S_i$ (where $S_i$ is the incoming neighbor signal under either standard PPR or escape-scaled pull diffusion) yields an exact quadratic system in $(y_i, \alpha_i)$. We derive its closed-form algebraic solution---proving that the quadratic factors cleanly into $(y_i - x_i)(y_i + x_i - S_i) = 0$ with active branch $y_i = S_i - x_i$ and $\alpha_i = \frac{S_i - 2x_i}{S_i - x_i}$---as well as its time-lagged iterative form $\alpha_i^{(t+1)} = 1 - \frac{x_i}{y_i^{(t)}}$. We further prove why the method excels as the prior $x$ approaches the uniform distribution ($x_i = 1/n$, canonical PageRank), and we formulate two operational modes: (a) $100\%$ standalone iterative execution, and (b) hybrid post-processing refinement (``polishing'' / $50\%$ blending) applied on top of a baseline estimator.
+\end{abstract}
+
+\vspace{0.3cm}
+\hrule
+\vspace{0.3cm}
+
+\section{Introduction}
+
+Let $G=(V,E)$ be an undirected graph with $|V|=n$ vertices where each edge $(i,j) \in E$ is present independently with probability $p_{ij} \in (0,1]$, and let $x \in \mathbb{R}^n_{>0}$ ($\sum_{i=1}^n x_i = 1$) be a strictly positive prior distribution over vertices. In a sampled realization $G' \sim G$, let $C(i)$ denote the connected component containing vertex $i$. The expected reachable mass from vertex $i$ is:
+\[
+y^*_i = \mathbb{E}\!\left[\sum_{v \in C(i)} x_v\right]
+\]
+which coincides with single-seed node-weighted Independent Cascade influence spread [1] and, for uniform prior $x_i = 1/n$, Edge Percolated Component (EPC) centrality [2, 3].
+
+In [4], we showed that calibrating a global scalar damping factor $\alpha = \mathrm{clip}(c_0 + c_1 \bar{P}_{\mathrm{esc}}, 0.4, 1.0)$ from the mean escape probability $\bar{P}_{\mathrm{esc}} = \frac{1}{n}\sum_i P_{\mathrm{esc}}(i)$, where $P_{\mathrm{esc}}(i) = 1 - \prod_{j \in N(i)}(1 - p_{ij})$, recovers over $98\%$ of the best scalar damping factor. Yet we also uncovered a striking structural gap: optimizing a \textbf{per-vertex damping vector} $\alpha = (\alpha_1, \dots, \alpha_n)^\top$ against an independent ground-truth estimate beats the best scalar $\alpha$ by $+0.062$ Spearman $\rho$ across all topologies and by $+0.341$ on regular grids, where $P_{\mathrm{esc}}(i)$ is constant across interior vertices. Thus, optimal per-vertex damping is governed by \textbf{multi-hop accumulated influence relative to the prior}, not merely by one-hop escape.
+
+\subsection{The Principle of Proportional Relative Influence}
+
+To capture this per-vertex structural signal without supervision or grid search, we propose a self-consistent physical principle at each vertex $i$ and iteration $t$:
+
+\begin{quote}
+\textbf{Proportional Relative Influence Principle:} \textit{The relative weight $\frac{\alpha_i}{1 - \alpha_i}$ assigned by vertex $i$ to external propagation ($\alpha_i$) versus internal prior retention ($1 - \alpha_i$) must equal the relative importance of the vertex's external influence $(y_i - x_i)$ with respect to its intrinsic internal influence $x_i$:}
+\[
+\frac{\alpha_i}{1 - \alpha_i} = \frac{y_i - x_i}{x_i}
+\]
+\end{quote}
+
+\section{Exact Mathematical Solution of the Coupled $(y_i, \alpha_i)$ System}
+
+For any vertex $i \in V$, let $S_i$ denote the aggregated incoming neighbor signal at the current iteration, defined for the two diffusion families studied in [4] as:
+\[
+S_i \triangleq \begin{cases} \displaystyle\sum_{j \in N(i)} w_{ij} y_j, & \text{(Standard PPR Variant)} \\[12pt] \displaystyle P_{\mathrm{esc}}(i) \sum_{j \in N(i)} w_{ij} y_j, & \text{(Escape-Scaled Pull Variant)} \end{cases}
+\]
+
+We seek to solve the coupled $2 \times 2$ non-linear algebraic system for the unknowns $(y_i, \alpha_i)$ at vertex $i$, given known $x_i > 0$ and $S_i \ge 0$:
+\[
+\begin{cases}
+y_i = (1 - \alpha_i) x_i + \alpha_i S_i & \text{(Diffusion Equation)} \\[8pt]
+\dfrac{\alpha_i}{1 - \alpha_i} = \dfrac{y_i - x_i}{x_i} & \text{(Proportionality Equation)}
+\end{cases}
+\]
+
+\subsection{Step-by-Step Algebraic Derivation (Closed-Form Roots)}
+
+\noindent\textbf{Step 1 (Expressing $\alpha_i$ and $1 - \alpha_i$ in terms of $y_i$ and $x_i$):} \\
+Adding $1$ to both sides of the Proportionality Equation yields:
+\[
+\frac{\alpha_i}{1 - \alpha_i} + 1 = \frac{y_i - x_i}{x_i} + 1 \implies \frac{1}{1 - \alpha_i} = \frac{y_i}{x_i}
+\]
+Assuming $y_i > 0$, we invert both sides to obtain:
+\[
+1 - \alpha_i = \frac{x_i}{y_i} \qquad \text{and} \qquad \alpha_i = 1 - \frac{x_i}{y_i} = \frac{y_i - x_i}{y_i}
+\]
+Notice that $\alpha_i \in [0, 1)$ holds if and only if $y_i \ge x_i$ (which is always physically satisfied by true reachability $y^*_i = x_i + \sum_{v \in C(i)\setminus\{i\}} x_v \ge x_i$).
+
+\vspace{0.2cm}
+\noindent\textbf{Step 2 (Substitution into the Diffusion Equation):} \\
+Substituting $1 - \alpha_i = \frac{x_i}{y_i}$ and $\alpha_i = \frac{y_i - x_i}{y_i}$ into the Diffusion Equation gives:
+\[
+y_i = \left(\frac{x_i}{y_i}\right) x_i + \left(\frac{y_i - x_i}{y_i}\right) S_i
+\]
+Multiplying both sides by $y_i$:
+\[
+y_i^2 = x_i^2 + (y_i - x_i) S_i
+\]
+Moving all terms to the left-hand side gives the quadratic equation in $y_i$:
+\[
+y_i^2 - S_i y_i + x_i S_i - x_i^2 = 0
+\]
+
+\vspace{0.2cm}
+\noindent\textbf{Step 3 (Exact Factorization and Discriminant):} \\
+Grouping $y_i^2 - x_i^2 = (y_i - x_i)(y_i + x_i)$, the quadratic equation factors \textbf{exactly} without irrational square roots:
+\[
+(y_i^2 - x_i^2) - S_i(y_i - x_i) = 0 \implies \boxed{\;(y_i - x_i)\big(y_i + x_i - S_i\big) = 0\;}
+\]
+Equivalently, its discriminant is:
+\[
+\Delta = (-S_i)^2 - 4(1)(x_i S_i - x_i^2) = S_i^2 - 4 x_i S_i + 4 x_i^2 = (S_i - 2x_i)^2 \ge 0
+\]
+Therefore, the roots are:
+\[
+y_i = \frac{S_i \pm |S_i - 2x_i|}{2} \implies \begin{cases} y_{i,1} = x_i \\[6pt] y_{i,2} = S_i - x_i \end{cases}
+\]
+
+\noindent\textbf{Theorem 1 (Exact Closed-Form Solution of the Coupled Proportional System).} \textit{For any vertex $i$ with prior $x_i > 0$ and incoming neighbor mass $S_i \ge 0$, the coupled system admits two exact algebraic branches:}
+\begin{enumerate}
+    \item \textbf{The Trivial (Self-Confined) Branch:}
+    \[
+    y_i = x_i, \qquad \alpha_i = 0
+    \]
+    \item \textbf{The Active Propagation Branch (valid whenever $S_i > 2x_i$):}
+    \[
+    \boxed{\;y_i = S_i - x_i, \qquad \alpha_i = \frac{S_i - 2x_i}{S_i - x_i} = 1 - \frac{x_i}{S_i - x_i} \in (0, 1)\;}
+    \]
+    \textit{When $S_i \le 2x_i$, the active root satisfies $y_{i,2} = S_i - x_i \le x_i$ (which would imply $\alpha_i \le 0$), so the non-negativity constraint $\alpha_i \ge 0$ selects the upper envelope $y_i = \max(x_i, S_i - x_i) = \frac{S_i + |S_i - 2x_i|}{2}$.}
+\end{enumerate}
+
+\noindent\textbf{Verification:} Substituting $y_i = S_i - x_i$ and $\alpha_i = \frac{S_i - 2x_i}{S_i - x_i}$ into the Diffusion Equation yields:
+\[
+(1 - \alpha_i)x_i + \alpha_i S_i = \frac{x_i}{S_i - x_i} x_i + \frac{S_i - 2x_i}{S_i - x_i} S_i = \frac{S_i^2 - 2x_i S_i + x_i^2}{S_i - x_i} = \frac{(S_i - x_i)^2}{S_i - x_i} = S_i - x_i = y_i
+\]
+and substituting into the Proportionality Equation yields:
+\[
+\frac{\alpha_i}{1 - \alpha_i} = \frac{\frac{S_i - 2x_i}{S_i - x_i}}{\frac{x_i}{S_i - x_i}} = \frac{S_i - 2x_i}{x_i} = \frac{(S_i - x_i) - x_i}{x_i} = \frac{y_i - x_i}{x_i}
+\]
+which confirms the identity identically.
+
+\subsection{Time-Staggered (Iterative Lagged) and Direct-Excess Realizations}
+
+In an iterative fixed-point solver over rounds $t = 0, 1, 2, \dots$, the system can be executed in three mathematically distinct realizations depending on how time indexing and normalization are treated:
+
+\subsubsection*{Realization A: Exact Simultaneous Update on Unnormalized Reachability Scale}
+Since true expected reachable mass $y^*_i = \mathbb{E}[\sum_{v \in C(i)} x_v]$ satisfies $y^*_i \in [x_i, 1]$ (with $\sum_i y^*_i = \mathbb{E}[\sum_i |C(i)| x_i] \gg 1$), let $S_i^{(t)} = P_{\mathrm{esc}}(i) \sum_{j \in N(i)} p_{ij} y_j^{(t)}$ (or $\sum_{j \in N(i)} w_{ij} y_j^{(t)}$ scaled by effective degree). Applying the upper-envelope branch with a safety cap $\alpha_{\max} < 1$ gives:
+\[
+\alpha_i^{(t+1)} = \mathrm{clip}\!\left(\frac{S_i^{(t)} - 2x_i}{S_i^{(t)} - x_i},\; 0,\; \alpha_{\max}\right), \qquad y_i^{(t+1)} = \left(1 - \alpha_i^{(t+1)}\right) x_i + \alpha_i^{(t+1)} S_i^{(t)}
+\]
+
+\subsubsection*{Realization B: Time-Lagged Gauss--Jacobi Proportionality Update}
+If at iteration $t+1$ the proportionality condition $\frac{\alpha_i^{(t+1)}}{1 - \alpha_i^{(t+1)}} = \frac{y_i^{(t)} - x_i}{x_i}$ is evaluated using the \textbf{current excess influence} $y_i^{(t)} - x_i \ge 0$ accumulated up to round $t$ (where $y^{(t)}$ is scaled so that $y_i^{(t)} \ge x_i$, e.g., $y_i^{(0)} \leftarrow x_i + S_i^{(0)}$ at $t=0$), then $\alpha_i^{(t+1)}$ and $y_i^{(t+1)}$ are given directly without a threshold at $2x_i$:
+\[
+\boxed{\;\alpha_i^{(t+1)} = \frac{y_i^{(t)} - x_i}{y_i^{(t)}} = 1 - \frac{x_i}{y_i^{(t)}}, \qquad y_i^{(t+1)} = \frac{x_i^2}{y_i^{(t)}} + \left(1 - \frac{x_i}{y_i^{(t)}}\right) S_i^{(t)}\;}
+\]
+Notice that at convergence ($y_i^{(t+1)} = y_i^{(t)} = y_i$), Realization B reduces to the exact same quadratic $(y_i - x_i)(y_i + x_i - S_i) = 0$, while providing a smooth rational iteration at every finite step $t$.
+
+\subsubsection*{Realization C: Direct Neighbor-Signal Proportionality}
+If the relative external influence at step $t+1$ is measured directly by the incoming neighbor signal $S_i^{(t)}$ relative to $x_i$, i.e., $\frac{\alpha_i^{(t+1)}}{1 - \alpha_i^{(t+1)}} = \frac{S_i^{(t)}}{x_i}$, then solving for $\alpha_i^{(t+1)}$ and substituting into $y_i^{(t+1)}$ yields the unconditionally positive, smooth update:
+\[
+\boxed{\;\alpha_i^{(t+1)} = \frac{S_i^{(t)}}{x_i + S_i^{(t)}} \in (0,1), \qquad y_i^{(t+1)} = \frac{x_i^2 + \big(S_i^{(t)}\big)^2}{x_i + S_i^{(t)}}\;}
+\]
+
+\section{Why Uniformity of the Prior Distribution $x$ Maximizes Effectiveness}
+
+A central theoretical hypothesis of this work is that the proportional damping rule performs increasingly well as the prior distribution $x = (x_1, \dots, x_n)^\top$ approaches the \textbf{uniform distribution} $x_i = \frac{1}{n}$ (standard PageRank / EPC centrality), and degrades when $x$ is highly concentrated (personalized PageRank). We now prove this property analytically.
+
+\noindent\textbf{Proposition 2 (Sensitivity to Prior Non-Uniformity).} \textit{Let $\kappa(x) \triangleq \frac{\max_i x_i}{\min_i x_i} \ge 1$ denote the dynamic range of the prior $x$. In the Proportionality Equation $\frac{\alpha_i}{1 - \alpha_i} = \frac{y_i - x_i}{x_i}$:}
+\begin{enumerate}
+    \item \textit{When $x$ is uniform ($x_i = \frac{1}{n}$ for all $i$, so $\kappa(x) = 1$ and Shannon entropy $H(x) = \ln n$ is maximized), the denominator $x_i = \frac{1}{n}$ is identical across all vertices. Consequently, $\alpha_i = 1 - \frac{1}{n y_i}$ is a strictly monotonic, shift-invariant function of the vertex's topological reachability $y_i$ alone.}
+    \item \textit{As $x$ becomes localized ($\kappa(x) \to \infty$, e.g., single-seed or sparse topic-sensitive PPR where $x_i \to 0^+$ for non-seed vertices), the Jacobian of the odds ratio with respect to $x_i$ explodes as:}
+    \[
+    \left|\frac{\partial}{\partial x_i}\left(\frac{y_i - x_i}{x_i}\right)\right| = \frac{y_i}{x_i^2} \to \infty \quad \text{as } x_i \to 0^+
+    \]
+    \textit{causing $\alpha_i = \frac{y_i - x_i}{y_i} \to 1$ indiscriminately for all non-seed vertices with $y_i \gg x_i$, irrespective of whether vertex $i$ lies in a dense core or a sparse periphery.}
+\end{enumerate}
+
+Thus, uniform (or near-uniform) priors provide a universal reference baseline $x_i = 1/n$ against which the excess influence $y_i - x_i$ accurately measures local multi-hop connectivity. For skewed priors, regularizing the denominator via $x_i^{\mathrm{reg}} = (1 - \tau) x_i + \frac{\tau}{n}$ with $\tau \in (0, 1)$ restores well-conditioned behavior.
+
+\section{Two Operational Execution Modes: Standalone (100\%) vs.\ Hybrid Polishing (50\%)}
+
+We design two distinct algorithmic schedules for deploying the proportional damping system:
+
+\subsection{Mode (a): 100\% Standalone Execution}
+The algorithm runs purely under the self-consistent proportional equations from initialization to convergence:
+\begin{enumerate}
+    \item Initialize $y_i^{(0)} = x_i + P_{\mathrm{esc}}(i) \sum_{j \in N(i)} w_{ij} x_j$ (one-hop warm start so that $y_i^{(0)} > x_i$ for all non-isolated vertices).
+    \item For iteration $t = 0, 1, \dots, T_{\max} - 1$:
+    \begin{itemize}
+        \item Compute neighbor signal $S_i^{(t)} = P_{\mathrm{esc}}(i) \sum_{j \in N(i)} w_{ij} y_j^{(t)}$ (or $\sum_{j \in N(i)} w_{ij} y_j^{(t)}$).
+        \item Update $\alpha_i^{(t+1)}$ and $y_i^{(t+1)}$ via the coupled proportional system (Realization A, B, or C).
+        \item Check convergence in rank or $L_1$ norm.
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Mode (b): Hybrid Two-Stage Execution (``Trimming / Polishing'' --- e.g., 50\% Blend)}
+Rather than forcing the non-linear per-vertex system to build the global multi-hop hierarchy from scratch, Mode (b) uses a fast baseline estimator first, and applies the proportional system as a \textbf{local structural polisher (trimming/refinement)}:
+\begin{enumerate}
+    \item \textbf{Stage 1 (Baseline Global Estimation --- first 50\% of budget / initial solver):} Run a proven global algorithm---such as the scalar-calibrated escape-scaled diffusion $y^{\mathrm{base}}$ with $\alpha = \mathrm{clip}(0.502 + 0.558 \bar{P}_{\mathrm{esc}}, 0.4, 1.0)$ from [4], or 2-step Karrer--Newman--Zdeborov\'{a} message passing [5]---to obtain a globally well-calibrated vector $y^{\mathrm{base}}$ (rescaled so that $y_i^{\mathrm{base}} \ge x_i$, e.g., $y_i^{(0)} = x_i + \gamma y_i^{\mathrm{base}}$).
+    \item \textbf{Stage 2 (Proportional Local Polishing --- remaining 50\%):} Execute $K_{\mathrm{polish}}$ iterations (e.g., $1$ to $5$ sweeps) of the coupled proportional system starting from $y^{(0)}$, producing the locally refined vector $y^{\mathrm{prop}}$, and form the convex combination (or $50\% / 50\%$ rank-blend):
+    \[
+    y^{\mathrm{final}} = (1 - \beta)\, \mathrm{normalise}\big(y^{\mathrm{base}}\big) + \beta\, \mathrm{normalise}\big(y^{\mathrm{prop}}\big), \qquad \beta = 0.50
+    \]
+\end{enumerate}
+
+\noindent\textbf{Why Mode (b) is theoretically advantageous:} In Mode (a), early iterations only see 1-hop or 2-hop neighborhoods, so $\alpha_i^{(t)}$ initially reflects local degree rather than deep component size. In Mode (b), the baseline solver has already propagated mass across the entire graph; feeding $y^{\mathrm{base}}$ into the proportional equations immediately equips every vertex with its true multi-hop excess ratio $(y_i^{\mathrm{base}} - x_i)/x_i$, allowing $\alpha_i$ to execute a targeted non-linear correction that attenuates leaves and amplifies core hubs without risking global fixed-point drift.
+
+\section{Conclusion}
+
+By coupling the damped diffusion equation with the self-consistent proportionality condition $\frac{\alpha_i}{1 - \alpha_i} = \frac{y_i - x_i}{x_i}$, we obtain an exact, closed-form mechanism for per-vertex dynamic damping in uncertain graphs. The algebraic factorization $(y_i - x_i)(y_i + x_i - S_i) = 0$ reveals the exact threshold structure of the coupled system, while its hybrid polishing mode (Mode b) provides a principled pathway toward capturing the per-vertex damping ceiling in $O(|E|)$ time per sweep.
+
+\begin{thebibliography}{9}
+\bibitem{kempe03} D. Kempe, J. Kleinberg, and \'{E}. Tardos, ``Maximizing the spread of influence through a social network,'' in \textit{Proc. 9th ACM SIGKDD}, 2003, pp. 137--146.
+\bibitem{lin08} C.-Y. Lin et al., ``Hubba: Hub objects analyzer,'' \textit{Nucleic Acids Research}, vol. 36, pp. W438--W443, 2008.
+\bibitem{chin14} C.-H. Chin et al., ``cytoHubba: Identifying hub objects and sub-networks from complex interactome,'' \textit{BMC Systems Biology}, vol. 8, no. Suppl 4, p. S11, 2014.
+\bibitem{konstantellos26} I. Konstantellos, ``Damping from the escape probability: A free calibration rule for diffusion-based reachability ranking in uncertain graphs,'' Department of Computer Engineering and Informatics, University of Patras, 2026.
+\bibitem{karrer14} B. Karrer, M. E. J. Newman, and L. Zdeborov\'{a}, ``Percolation on sparse networks,'' \textit{Physical Review Letters}, vol. 113, p. 208702, 2014.
+\end{thebibliography}
+
+\end{document}

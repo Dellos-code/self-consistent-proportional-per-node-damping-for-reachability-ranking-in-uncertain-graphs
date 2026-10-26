@@ -1,0 +1,199 @@
+% --- UNIVERSAL PREAMBLE BLOCK ---
+\documentclass[11pt, a4paper]{article}
+
+\usepackage[a4paper, top=2.5cm, bottom=2.5cm, left=2cm, right=2cm]{geometry}
+\usepackage{fontspec}
+
+\usepackage[greek, bidi=basic, provide=*]{babel}
+
+\babelprovide[import, onchar=ids fonts]{greek}
+\babelprovide[import, onchar=ids fonts]{english}
+
+% Set default/Latin font to Sans Serif in the main (rm) slot
+\babelfont{rm}{Noto Sans}
+% Assign a specific font for Greek text
+\babelfont[greek]{rm}{Noto Sans}
+
+% Add because main language is not English
+\usepackage{enumitem}
+\setlist[itemize]{label=-}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\title{\textbf{Αυτοσυνεπής Αναλογική Απόσβεση ανά Κόμβο για την Κατάταξη Προσβασιμότητας σε Στοχαστικά Γραφήματα}}
+\author{\textbf{Ιωάννης Κωνσταντέλλος} \\ \textit{Τμήμα Μηχανικών Ηλεκτρονικών Υπολογιστών και Πληροφορικής, Πανεπιστήμιο Πατρών}}
+\date{Οκτώβριος 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Οι αλγόριθμοι αποσβεννύμενης διάχυσης (damped diffusions) για την εκτίμηση της αναμενόμενης προσβάσιμης μάζας (reachability / influence spread) $y^*_i = \mathbb{E}[\sum_{v \in C(i)} x_v]$ σε ένα στοχαστικό γράφημα $G=(V,E,p)$ χρησιμοποιούν παραδοσιακά έναν ενιαίο, καθολικό συντελεστή απόσβεσης $\alpha \in (0,1)$ για όλους τους κόμβους. Ωστόσο, όπως αποδείχθηκε στα πειράματα βελτιστοποίησης (per-node oracle) της προηγούμενης εργασίας μας, η απόδοση διαφορετικού συντελεστή $\alpha_i$ ανά κόμβο προσφέρει σημαντικό επιπλέον κέρδος ακρίβειας κατάταξης ($+0.062$ κατά μέσο όρο και $+0.341$ σε πλέγματα), το οποίο δεν μπορεί να ανακτηθεί μόνο από την τοπική πιθανότητα διαφυγής $P_{\mathrm{esc}}(i)$. Στην παρούσα εργασία εισηγούμαστε την \textbf{Αρχή της Αναλογικής Σχετικής Επιρροής}, βάσει της οποίας σε κάθε κόμβο $i$ και σε κάθε επανάληψη $t$, τόσο η νέα τιμή του $y_i$ όσο και ο τοπικός συντελεστής απόσβεσης $\alpha_i$ καθορίζονται ταυτόχρονα από τη λύση του συζευγμένου συστήματος: $y_i = (1 - \alpha_i)x_i + \alpha_i S_i$ και $\frac{\alpha_i}{1 - \alpha_i} = \frac{y_i - x_i}{x_i}$, όπου $S_i = \sum_j w_{ij} y_j$ (για το κλασικό PPR) ή $S_i = P_{\mathrm{esc}}(i) \sum_j w_{ij} y_j$ (για την pull παραλλαγή μας). Επιλύουμε αναλυτικά το μη-γραμμικό αυτό σύστημα σε κλειστή μορφή, αποδεικνύοντας ότι ανάγεται στην παραγοντοποιημένη δευτεροβάθμια εξίσωση $(y_i - x_i)(y_i + x_i - S_i) = 0$, η οποία δίνει τη μη-τετριμμένη λύση $y_i = S_i - x_i$ και $\alpha_i = \frac{S_i - 2x_i}{S_i - x_i}$, καθώς και τη χρονικά υστερημένη (lagged) επαναληπτική μορφή $\alpha_i^{(t+1)} = 1 - \frac{x_i}{y_i^{(t)}}$. Τέλος, τεκμηριώνουμε μαθηματικά γιατί η μέθοδος λειτουργεί βέλτιστα όσο η κατανομή των $x$ προσεγγίζει την ομοιόμορφη κατανομή (κλασικό PageRank) και αναλύουμε τις δύο προτεινόμενες εκδοχές εκτέλεσης: (α) $100\%$ αυτόνομη εκτέλεση και (β) υβριδική εκτέλεση (λ.χ. $50\%$ «τριμμάρισμα / λιμάρισμα») μετά την εκτέλεση ενός βασικού αλγορίθμου.
+\end{abstract}
+
+\vspace{0.3cm}
+\hrule
+\vspace{0.3cm}
+
+\section{Εισαγωγή και Κεντρική Ιδέα}
+
+Έστω ένα μη-κατευθυνόμενο στοχαστικό γράφημα $G=(V,E)$ με $|V|=n$ κόμβους, όπου κάθε ακμή $(i,j) \in E$ υπάρχει ανεξάρτητα με πιθανότητα $p_{ij} \in (0,1]$, και έστω $x \in \mathbb{R}^n_{>0}$ με $\sum_{i=1}^n x_i = 1$ η αρχική (prior) κατανομή σημαντικότητας των κόμβων. Το πρόβλημα της κατάταξης προσβασιμότητας (reachability ranking / single-seed influence spread) [1, 2, 3] συνίσταται στην εκτίμηση της ποσότητας:
+\[
+y^*_i = \mathbb{E}\!\left[\sum_{v \in C(i)} x_v\right]
+\]
+όπου $C(i)$ είναι η συνδεδεμένη συνιστώσα του κόμβου $i$ σε έναν τυχαίο κόσμο $G' \sim G$.
+
+Στην εργασία μας [4] εξετάσαμε τόσο τον τελεστή του Personalized PageRank (PPR) όσο και την Escape-Scaled Pull παραλλαγή μας με καθολικό συντελεστή $\alpha(\bar{P}_{\mathrm{esc}})$, αποδεικνύοντας παράλληλα ότι η χρήση ξεχωριστού $\alpha_i$ ανά κόμβο κρύβει ένα ανεκμετάλλευτο περιθώριο βελτίωσης ($+0.062$ έως $+0.341$ Spearman $\rho$).
+
+\subsection{Το Φυσικό Σκεπτικό της Προτεινόμενης Ιδέας}
+
+Σε κάθε κόμβο $i$, η συνολική επιρροή $y_i$ αποτελείται από την ενδογενή επιρροή $x_i$ (εντός του ίδιου του κόμβου) και την εξωγενή επιρροή $y_i - x_i$ (εκτός του κόμβου, η οποία προέρχεται από τη διάχυση στο δίκτυο). Η κεντρική ιδέα που προτείνουμε διατυπώνεται ως εξής:
+
+\begin{quote}
+\textbf{Αρχή Αναλογικής Σχετικής Σημαντικότητας:} \textit{Σε κάθε κόμβο και σε κάθε γύρο (iteration), η σχετική σημαντικότητα της επιρροής του κόμβου έξω από τον κόμβο ($y_i - x_i$) ως προς την επιρροή εντός του κόμβου ($x_i$) πρέπει να είναι ίση με τον λόγο του συντελεστή $\alpha_i$ (που αναζήτησε την επιρροή εκτός του κόμβου) ως προς τον συντελεστή $1 - \alpha_i$ (που την κράτησε στον ίδιο τον κόμβο):}
+\[
+\frac{\alpha_i}{1 - \alpha_i} = \frac{y_i - x_i}{x_i}
+\]
+\end{quote}
+
+\section{Μαθηματική Επίλυση του Συστήματος ως προς $y_i$ και $\alpha_i$}
+
+Για κάθε κόμβο $i$, συμβολίζουμε με $S_i$ το εισερχόμενο σήμα από τους γείτονές του $j \in N(i)$ στον τρέχοντα γύρο. Ανάλογα με την επιλεγμένη παραλλαγή διάχυσης, το $S_i$ (το οποίο είναι γνωστό στον τρέχοντα γύρο) δίνεται από:
+\[
+S_i \triangleq \begin{cases} \displaystyle\sum_{j \in N(i)} w_{ij} y_j, & \text{(Κλασική παραλλαγή PPR)} \\[12pt] \displaystyle P_{\mathrm{esc}}(i) \sum_{j \in N(i)} w_{ij} y_j, & \text{(Escape-Scaled Pull παραλλαγή)} \end{cases}
+\]
+
+Καλούμαστε να λύσουμε για κάθε κόμβο $i$ το ακόλουθο σύστημα των δύο εξισώσεων με δύο αγνώστους ($y_i$ και $\alpha_i$), όπου τα $x_i > 0$ και $S_i \ge 0$ είναι γνωστά:
+\[
+\begin{cases}
+y_i = (1 - \alpha_i) x_i + \alpha_i S_i & \text{(Εξίσωση 1: Διάχυση)} \\[8pt]
+\dfrac{\alpha_i}{1 - \alpha_i} = \dfrac{y_i - x_i}{x_i} & \text{(Εξίσωση 2: Αναλογία Επιρροής)}
+\end{cases}
+\]
+
+\subsection{Αναλυτική Αλγεβρική Επίλυση («Η Μαθηματική Λάτζα»)}
+
+\noindent\textbf{Βήμα 1ο: Επίλυση της Εξίσωσης 2 ως προς $\alpha_i$ και $1 - \alpha_i$ συναρτήσει του $y_i$} \\
+Από την Εξίσωση 2 έχουμε:
+\[
+\frac{\alpha_i}{1 - \alpha_i} = \frac{y_i}{x_i} - 1 \implies \frac{\alpha_i}{1 - \alpha_i} + 1 = \frac{y_i}{x_i} \implies \frac{\alpha_i + 1 - \alpha_i}{1 - \alpha_i} = \frac{y_i}{x_i} \implies \frac{1}{1 - \alpha_i} = \frac{y_i}{x_i}
+\]
+Αντιστρέφοντας τα δύο μέλη (εφόσον $y_i > 0$), βρίσκουμε αμέσως τους συντελεστές $1 - \alpha_i$ και $\alpha_i$:
+\[
+1 - \alpha_i = \frac{x_i}{y_i} \qquad \text{και} \qquad \alpha_i = 1 - \frac{x_i}{y_i} = \frac{y_i - x_i}{y_i}
+\]
+
+\vspace{0.2cm}
+\noindent\textbf{Βήμα 2ο: Αντικατάσταση στην Εξίσωση 1 και Αναγωγή σε Δευτεροβάθμια Εξίσωση} \\
+Αντικαθιστούμε τα $1 - \alpha_i = \frac{x_i}{y_i}$ και $\alpha_i = \frac{y_i - x_i}{y_i}$ στην Εξίσωση 1:
+\[
+y_i = \left(\frac{x_i}{y_i}\right) x_i + \left(\frac{y_i - x_i}{y_i}\right) S_i
+\]
+Πολλαπλασιάζουμε και τα δύο μέλη με $y_i > 0$ για να απαλείψουμε τους παρονομαστές:
+\[
+y_i^2 = x_i^2 + (y_i - x_i) S_i \implies y_i^2 - S_i y_i + x_i S_i - x_i^2 = 0
+\]
+
+\vspace{0.2cm}
+\noindent\textbf{Βήμα 3ο: Ακριβής Παραγοντοποίηση και Εύρεση των Ριζών} \\
+Μπορούμε να λύσουμε την παραπάνω δευτεροβάθμια εξίσωση είτε μέσω της διακρίνουσας $\Delta$, είτε με άμεση παραγοντοποίηση!
+\begin{itemize}
+    \item \textbf{Με παραγοντοποίηση:} Γράφουμε $y_i^2 - x_i^2 = (y_i - x_i)(y_i + x_i)$, οπότε η εξίσωση $y_i^2 - x_i^2 - S_i(y_i - x_i) = 0$ γίνεται:
+    \[
+    (y_i - x_i)\big(y_i + x_i - S_i\big) = 0
+    \]
+    \item \textbf{Με διακρίνουσα:} $\Delta = (-S_i)^2 - 4 \cdot 1 \cdot (x_i S_i - x_i^2) = S_i^2 - 4x_i S_i + 4x_i^2 = (S_i - 2x_i)^2 \ge 0$, άρα:
+    \[
+    y_i = \frac{S_i \pm (S_i - 2x_i)}{2}
+    \]
+\end{itemize}
+
+Και με τους δύο τρόπους προκύπτουν \textbf{δύο ακριβείς, κλειστού τύπου λύσεις}:
+\begin{enumerate}
+    \item \textbf{Η Τετριμμένη (Απομονωμένη) Λύση:}
+    \[
+    y_{i,1} = x_i \implies \alpha_{i,1} = \frac{x_i - x_i}{x_i} = 0
+    \]
+    \item \textbf{Η Ενεργή (Μη-Τετριμμένη) Λύση Διάχυσης:}
+    \[
+    y_i + x_i - S_i = 0 \implies \boxed{\;y_i = S_i - x_i\;}
+    \]
+    και αντικαθιστώντας το $y_i = S_i - x_i$ στον τύπο $\alpha_i = \frac{y_i - x_i}{y_i}$, βρίσκουμε την ακριβή τιμή του $\alpha_i$:
+    \[
+    \boxed{\;\alpha_i = \frac{(S_i - x_i) - x_i}{S_i - x_i} = \frac{S_i - 2x_i}{S_i - x_i} = 1 - \frac{x_i}{S_i - x_i}\;}
+    \]
+\end{enumerate}
+
+\subsection{Πότε Ενεργοποιείται η Μη-Τετριμμένη Λύση και οι 3 Τρόποι Υλοποίησης στον Αλγόριθμο}
+
+Παρατηρούμε ότι στη μη-τετριμμένη λύση $y_i = S_i - x_i$ και $\alpha_i = \frac{S_i - 2x_i}{S_i - x_i}$, για να είναι το $\alpha_i \in (0, 1)$ (και αντίστοιχα $y_i > x_i$), πρέπει να ισχύει $S_i > 2x_i$. Αυτό μας δίνει τρεις εξαιρετικά καθαρές αλγοριθμικές υλοποιήσεις:
+
+\begin{enumerate}
+    \item \textbf{Υλοποίηση Α (Ταυτόχρονη Αλγεβρική Επίλυση στην Ακανονικοποίητη Κλίμακα του $y^*$):} \\
+    Εφόσον η πραγματική προσβάσιμη μάζα $y^*_i = \mathbb{E}[\sum_{v \in C(i)} x_v]$ ικανοποιεί $y^*_i \ge x_i$ (χωρίς κανονικοποίηση σε άθροισμα $1$ σε κάθε βήμα, ή με $S_i = P_{\mathrm{esc}}(i) \sum_{j \in N(i)} p_{ij} y_j$), για κάθε κόμβο με $S_i > 2x_i$ εφαρμόζουμε απευθείας:
+    \[
+    y_i = S_i - x_i, \qquad \alpha_i = \frac{S_i - 2x_i}{S_i - x_i}
+    \]
+    ενώ αν $S_i \le 2x_i$, επιλέγεται η άνω περιβάλλουσα $y_i = \max(x_i, S_i - x_i) = x_i$ με $\alpha_i = 0$.
+
+    \item \textbf{Υλοποίηση Β (Χρονικά Υστερημένη Επανάληψη --- Lagged Iteration):} \\
+    Αν στον γύρο $t+1$ το δεξί μέλος της αναλογίας $\frac{\alpha_i^{(t+1)}}{1 - \alpha_i^{(t+1)}} = \frac{y_i^{(t)} - x_i}{x_i}$ υπολογιστεί από την \textbf{τρέχουσα εκτίμηση} $y_i^{(t)}$ του προηγούμενου γύρου $t$ (ξεκινώντας από $y_i^{(0)} = x_i + S_i^{(0)} > x_i$), τότε το $\alpha_i^{(t+1)}$ και το νέο $y_i^{(t+1)}$ δίνονται ομαλά για κάθε $S_i^{(t)} > 0$ από τις εξισώσεις:
+    \[
+    \boxed{\;\alpha_i^{(t+1)} = \frac{y_i^{(t)} - x_i}{y_i^{(t)}} = 1 - \frac{x_i}{y_i^{(t)}}, \qquad y_i^{(t+1)} = \frac{x_i^2}{y_i^{(t)}} + \left(1 - \frac{x_i}{y_i^{(t)}}\right) S_i^{(t)}\;}
+    \]
+
+    \item \textbf{Υλοποίηση Γ (Άμεση Αναλογία Εξωτερικού Σήματος $S_i / x_i$):} \\
+    Αν η εξωτερική επιρροή στον λόγο μετρηθεί απευθείας από το εισερχόμενο σήμα των γειτόνων $S_i^{(t)}$ ως προς το $x_i$, δηλαδή $\frac{\alpha_i^{(t+1)}}{1 - \alpha_i^{(t+1)}} = \frac{S_i^{(t)}}{x_i}$, τότε προκύπτει η παντού θετική και ομαλή λύση:
+    \[
+    \boxed{\;\alpha_i^{(t+1)} = \frac{S_i^{(t)}}{x_i + S_i^{(t)}} \in (0,1), \qquad y_i^{(t+1)} = \frac{x_i^2 + \big(S_i^{(t)}\big)^2}{x_i + S_i^{(t)}}\;}
+    \]
+\end{enumerate}
+
+\section{Γιατί η Ομοιόμορφη Κατανομή των $x$ (Κλασικό PageRank) Ευνοεί τον Αλγόριθμο}
+
+Η παρατήρηση ότι \textit{όσο περισσότερο η κατανομή των $x$ είναι ομοιόμορφη (δηλαδή κλασικό PageRank με $x_i = \frac{1}{n}$ αντί για Personalized PageRank), τόσο καλύτερα δουλεύει η μέθοδος} επιβεβαιώνεται αυστηρά από τη μαθηματική μορφή της εξίσωσης $\frac{\alpha_i}{1 - \alpha_i} = \frac{y_i - x_i}{x_i}$:
+
+\begin{enumerate}
+    \item \textbf{Απουσία Απειρισμών (No Division-by-Zero Singularities):} Στο αυστηρό Personalized PageRank (λ.χ. single-seed ή small-seed set), η συντριπτική πλειοψηφία των κόμβων έχει $x_i = 0$ (ή $x_i \approx 0$). Καθώς $x_i \to 0^+$, το κλάσμα $\frac{y_i - x_i}{x_i}$ απειρίζεται ($\to +\infty$), εξωθώντας το $\alpha_i \to 1$ για όλους τους κόμβους εκτός του σπόρου, ανεξάρτητα από την τοπολογία τους!
+    \item \textbf{Κοινή Στάθμη Αναφοράς στο Ομοιόμορφο PageRank ($x_i = \frac{1}{n}$):} Όταν η κατανομή του $x$ είναι ομοιόμορφη ($x_i = \frac{1}{n}$ για κάθε $i \in V$), όλοι οι κόμβοι ξεκινούν από την ίδια ακριβώς ενδογενή βάση $\frac{1}{n}$. Έτσι, ο λόγος:
+    \[
+    \frac{\alpha_i}{1 - \alpha_i} = n y_i - 1 \implies \alpha_i = 1 - \frac{1}{n y_i}
+    \]
+    εξαρτάται \textbf{αποκλειστικά και καθαρά από την τοπολογική ικανότητα του κόμβου $i$ να συγκεντρώνει μάζα από το γράφημα} (το Edge Percolated Component centrality του!), αποδίδοντας υψηλότερο $\alpha_i$ στους κόμβους του πυρήνα και χαμηλότερο $\alpha_i$ στους απομονωμένους/περιφερειακούς κόμβους.
+\end{enumerate}
+
+\section{Οι Δύο Εκδοχές Εκτέλεσης: (α) 100\% Αυτόνομη vs.\ (β) 50\% «Τριμμάρισμα / Λιμάρισμα»}
+
+Σύμφωνα με τον σχεδιασμό μας, ο αλγόριθμος δοκιμάζεται σε δύο διακριτά σχήματα:
+
+\subsection{Εκδοχή (α): 100\% Αυτόνομη Εκτέλεση (Standalone Execution)}
+Ο αλγόριθμος ξεκινά εξαρχής από την αρχική κατανομή (με εκκίνηση 1 βήματος $y_i^{(0)} = x_i + S_i^{(0)}$ ώστε $y_i^{(0)} > x_i$) και εκτελεί αποκλειστικά τις εξισώσεις της Ενότητας 2 μέχρις ότου συγκλίνουν ταυτόχρονα τα διανύσματα $y^{(t)}$ και $\alpha^{(t)}$.
+
+\subsection{Εκδοχή (β): Υβριδική Εκτέλεση --- π.χ.\ 50\% «Τριμμάρισμα / Λιμάρισμα» (Post-Processing Refinement)}
+Στην εκδοχή αυτή, η αυτοσυνεπής αναλογική απόσβεση χρησιμοποιείται ως τελεστής \textbf{«τριμμαρίσματος / λιμαρίσματος» (fine-tuning / polishing)} αφού έχει προηγηθεί ένας άλλος γρήγορος αλγόριθμος:
+
+\begin{enumerate}
+    \item \textbf{Φάση 1η (Αρχικός Αλγόριθμος Βάσης):} Εκτελούμε πρώτα τον βαθμονομημένο αλγόριθμο του [4] με καθολικό $\alpha = \mathrm{clip}(0.502 + 0.558 \bar{P}_{\mathrm{esc}}, 0.4, 1.0)$ (ή 2 επαναλήψεις Message Passing [5]), παράγοντας το αρχικό διάνυσμα εκτίμησης $y^{\mathrm{base}}$ (κανονικοποιημένο στην κλίμακα $y_i^{(0)} = x_i + \gamma y_i^{\mathrm{base}} > x_i$).
+    \item \textbf{Φάση 2η (Τριμμάρισμα / Λιμάρισμα μέσω Αναλογικού $\alpha_i$):} Εφαρμόζουμε το συζευγμένο σύστημα $(y_i, \alpha_i)$ της Ενότητας 2 πάνω στο $y^{(0)}$ για μικρό αριθμό επαναλήψεων (ή συνδυάζουμε σε ποσοστό $50\% - 50\%$ το αρχικό διάνυσμα $y^{\mathrm{base}}$ με το «λιμαρισμένο» διάνυσμα $y^{\mathrm{prop}}$):
+    \[
+    y^{\mathrm{final}} = 0.50 \cdot \mathrm{normalise}\big(y^{\mathrm{base}}\big) + 0.50 \cdot \mathrm{normalise}\big(y^{\mathrm{prop}}\big)
+    \]
+\end{enumerate}
+
+\noindent\textbf{Γιατί η Εκδοχή (β) είναι εξαιρετικά υποσχόμενη:} Στη Φάση 1, ο βασικός αλγόριθμος με το καθολικό $\alpha(\bar{P}_{\mathrm{esc}})$ βρίσκει γρήγορα και με απόλυτη ευστάθεια τη μακροσκοπική κλίμακα του $y_i$ σε ολόκληρο το γράφημα (recovered $98.2\%$ του scalar oracle). Στη συνέχεια, στη Φάση 2, η εξίσωση $\frac{\alpha_i}{1 - \alpha_i} = \frac{y_i - x_i}{x_i}$ βρίσκει έτοιμο ένα αξιόπιστο $y_i$ για κάθε κόμβο και προσαρμόζει τοπικά το $\alpha_i$ του κάθε κόμβου, «λιμάροντας» τις τοπικές ατέλειες του ενιαίου $\alpha$ και στοχεύοντας απευθείας στο επιπλέον κέρδος ($+0.062$ έως $+0.341$) του per-node oracle!
+
+\section{Συμπεράσματα}
+
+Η σύζευξη της εξίσωσης διάχυσης με τον αναλογικό κανόνα $\frac{\alpha_i}{1 - \alpha_i} = \frac{y_i - x_i}{x_i}$ οδηγεί σε ένα κομψό, πλήρως επιλύσιμο αλγεβρικά σύστημα ($(y_i - x_i)(y_i + x_i - S_i) = 0$ με ενεργή ρίζα $y_i = S_i - x_i$ και $\alpha_i = \frac{S_i - 2x_i}{S_i - x_i}$), το οποίο επιτρέπει σε κάθε κόμβο να ρυθμίζει δυναμικά τον δικό του συντελεστή απόσβεσης $\alpha_i$ σε κάθε γύρο, χωρίς καμία ελεύθερη υπερπαράμετρο.
+
+\begin{thebibliography}{9}
+\bibitem{kempe03} D. Kempe, J. Kleinberg, and \'{E}. Tardos, ``Maximizing the spread of influence through a social network,'' in \textit{Proc. 9th ACM SIGKDD}, 2003, pp. 137--146.
+\bibitem{lin08} C.-Y. Lin et al., ``Hubba: Hub objects analyzer,'' \textit{Nucleic Acids Research}, vol. 36, pp. W438--W443, 2008.
+\bibitem{chin14} C.-H. Chin et al., ``cytoHubba: Identifying hub objects and sub-networks from complex interactome,'' \textit{BMC Systems Biology}, vol. 8, no. Suppl 4, p. S11, 2014.
+\bibitem{konstantellos26} I. Konstantellos, ``Damping from the escape probability: A free calibration rule for diffusion-based reachability ranking in uncertain graphs,'' CEID, University of Patras, 2026.
+\bibitem{karrer14} B. Karrer, M. E. J. Newman, and L. Zdeborov\'{a}, ``Percolation on sparse networks,'' \textit{Physical Review Letters}, vol. 113, p. 208702, 2014.
+\end{thebibliography}
+
+\end{document}
